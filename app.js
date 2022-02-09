@@ -2,33 +2,99 @@ const axios = require("axios");
 const FormData = require("form-data");
 const HTMLParser = require("node-html-parser");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+const csv = require("csv-parser");
+const fs = require("fs");
 
 const baseURL = "https://world.optimizely.com/documentation/Release-Notes";
 const packageQuery = "/?packageFilter=";
-const package = "EPiServer.CMS.UI";
-const newVersion = "11.36.4";
-const oldVersion = "11.30.0";
 
-const getRows = async () => {
+let packageData = [];
+
+let stream = fs.createReadStream("input.csv").pipe(csv({ headers: false }));
+
+stream.on("data", (row) => {
+  let rowObj = {
+    package: row["0"],
+    oldVersion: row["1"],
+    newVersion: row["2"],
+  };
+  packageData.push(rowObj);
+});
+
+let end = new Promise(function (resolve, reject) {
+  stream.on("end", () => {
+    console.log("CSV file successfully processed");
+    resolve(packageData);
+  });
+});
+
+//outputs an array of version based on site's filters
+const getVersions = async (old, updated, package) => {
+  try {
+    let uri = encodeURI(baseURL + packageQuery + package);
+    const response = await axios.get(uri);
+
+    if (response.status !== 200) {
+      throw new Error(`HTTP Error, status: ${response.status}`);
+    }
+
+    let root = HTMLParser.parse(response.data);
+    let versionElements = root.querySelectorAll(".VersionFilters");
+
+    if (versionElements.length === 0) {
+      return;
+    }
+    let versions = versionElements.map((el) => {
+      return el.attributes.value;
+    });
+
+    let filteredVersions = versions.slice(
+      versions.indexOf(updated),
+      versions.indexOf(old)
+    );
+
+    console.log("versionArray built.");
+    return filteredVersions;
+  } catch (error) {
+    console.log("getVersions() error: ", error);
+  }
+};
+
+//outputs a FormData object to post to API
+const makeFormData = (versionArray, package, count) => {
+  if (versionArray.length < 1) {
+    throw new Error("makeFormData() error: versionArray length < 1");
+  }
+
   let fields = {
     IsService: "False",
-    VersionFilters: "11.36.4",
     PackageFilter: package,
     TypeFilter: "All",
     TypeFilter: "All",
-    pageSize: "10",
+    pageSize: count.toString(),
     ShowOnlyReleased: "false",
   };
 
   let formData = new FormData();
-  let data = [];
 
   for (let key in fields) {
     formData.append(key, fields[key]);
   }
 
+  for (let i = 0; i < versionArray.length; i++) {
+    formData.append("VersionFilters", versionArray[i]);
+  }
+
+  console.log("formData built");
+  return formData;
+};
+
+//outputs a object of data from Optimizely
+const getRows = async (formData, package) => {
+  let data = [];
+
   try {
-    const response = await axios({
+    let response = await axios({
       url: baseURL,
       method: "post",
       headers: {
@@ -36,12 +102,22 @@ const getRows = async () => {
       },
       data: formData,
     });
+
+    if (response.status !== 200) {
+      throw new Error(`HTTP Error, status: ${response.status}`);
+    }
+
     let root = HTMLParser.parse(response.data);
 
     let rows = root.querySelectorAll(".forum-table tr");
 
     for (i = 1; i < rows.length; i++) {
       let content = rows[i];
+
+      if (i == 1 && content.innerHTML.includes("No matching records found.")) {
+        console.log(`No release notes found for ${package}`);
+        continue;
+      }
 
       let id = content.querySelector("td > span > a").innerText;
       let url =
@@ -56,53 +132,24 @@ const getRows = async () => {
 
       data.push(rowObj);
     }
+
+    console.log(`changelog rows for ${package} retrieved successfully`);
     return data;
   } catch (error) {
-    console.log("request() error: ", error);
+    console.log("getRows() Error: ", error);
   }
 };
 
-//creates an array of version based on site's filters
-//uses user input: old version, new version, package name
-const getVersions = async (old, update, package) => {
-  try {
-    const response = await axios.get(baseURL + packageQuery + package);
-
-    let root = HTMLParser.parse(response.data);
-
-    let versionElements = root.querySelectorAll(".VersionFilters");
-    let versions = versionElements.map((el) => {
-      return el.attributes.value;
-    });
-
-    let filteredVersions = versions.slice(
-      versions.indexOf(update),
-      versions.indexOf(old)
-    );
-
-    return filteredVersions;
-  } catch (error) {
-    console.log("request() error: ", error);
-  }
-};
-
-const makeFormData = async () => {
-  //creates the form data that gets passed to getRows
-  //uses getVerions()
-  //uses user input for package
-
-  return;
-};
-const writeCSV = async () => {
+//outputs a CSV file
+const writeCSV = async (data) => {
   const csvWriter = createCsvWriter({
-    path: "out.csv",
+    path: `output.csv`,
     header: [
-      { id: "id", title: "ID" },
-      { id: "url", title: "URL" },
-      { id: "type", title: "TYPE" },
-      { id: "description", title: "DESCRIPTION" },
-      { id: "package", title: "PACKAGE" },
-      {},
+      { id: "id", title: "id" },
+      { id: "url", title: "url" },
+      { id: "type", title: "type" },
+      { id: "description", title: "description" },
+      { id: "package", title: "package" },
     ],
   });
 
@@ -114,10 +161,39 @@ const writeCSV = async () => {
     });
 };
 
-getVersions(oldVersion, newVersion, package).then((data) => {
-  console.log(data);
-});
+async function myAsyncFunction() {
+  let data = await end;
+  console.log("Looping through packages...");
+  let masterArray = [];
 
-getRows().then((data) => {
-  console.log(data);
-});
+  for (let i = 0; i < data.length; i++) {
+    let { oldVersion, newVersion, package } = data[i];
+
+    console.log(
+      `Finding updates for ${package}, from version ${oldVersion} to ${newVersion}...`
+    );
+
+    let versionArray = await getVersions(oldVersion, newVersion, package);
+
+    if (versionArray == undefined) {
+      console.log(
+        `no versions between ${oldVersion} and ${newVersion} found for ${package}`
+      );
+      continue;
+    }
+
+    let formData = makeFormData(versionArray, package, 1000);
+
+    let rows = await getRows(formData, package);
+
+    masterArray = masterArray.concat(rows);
+  }
+  writeCSV(masterArray);
+}
+
+myAsyncFunction();
+
+//this works... but it the EPiServer.CMS doesn't work when in the for-loop...
+//it's the first call, maybe it's happening too soon after the data is written??
+
+// getVersions("11.20.0", "11.20.11", "EPiServer.CMS");

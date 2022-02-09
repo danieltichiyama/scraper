@@ -1,5 +1,0 @@
-ID,URL,TYPE,DESCRIPTION,PACKAGE,
-CMS-20848,https://world.optimizely.com/documentation/Release-Notes/ReleaseNote/?releaseNoteId=CMS-20848,Bug,Page tree performance issue,EPiServer.CMS.UI,
-CMS-20604,https://world.optimizely.com/documentation/Release-Notes/ReleaseNote/?releaseNoteId=CMS-20604,Bug,Content selector does not show information about expired pages,EPiServer.CMS.UI,
-CMS-18990,https://world.optimizely.com/documentation/Release-Notes/ReleaseNote/?releaseNoteId=CMS-18990,Bug,Target language was latest published version instead of master language,EPiServer.CMS.UI,
-CMS-15759,https://world.optimizely.com/documentation/Release-Notes/ReleaseNote/?releaseNoteId=CMS-15759,Bug,Unable to create new page after setting Inherit settings from the parent page option,EPiServer.CMS.UI,
